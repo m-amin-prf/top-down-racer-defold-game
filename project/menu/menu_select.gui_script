@@ -1,0 +1,77 @@
+-- Pre Hashing
+local click = hash("touch")
+local prox = hash("prox")
+
+function init(self)
+	-- Animate screen moving in
+	self.move = gui.get_node("move")
+	gui.set_position(self.move, vmath.vector3(1024*x_pol,576*y_pol,0))
+	gui.animate(self.move, "position", vmath.vector3(0,0,0), gui.EASING_OUTCIRC, 1,0,
+	function()
+		msg.post(".", "acquire_input_focus")
+	end)
+
+	self.colour_b = gui.get_node("colour")
+	self.colour_u = gui.get_node("colour_under")
+	self.colour_p = gui.get_position(self.colour_b)
+
+	self.game_b = gui.get_node("game")
+	self.game_u = gui.get_node("game_under")
+	self.game_p = gui.get_position(self.game_b)
+
+	self.click = nil
+	self.clicked = false
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == prox then
+		msg.post(".", "release_input_focus")
+		x_pol, y_pol = message.x, message.y
+		gui.animate(self.move, "position", vmath.vector3(1024*x_pol,576*y_pol,0), gui.EASING_INCIRC, 1,0,
+		function()
+			x_pol, y_pol = -message.x, -message.y
+			msg.post("main:/prox_control", "s_prox",{prox = message.prox})
+		end)
+	end
+end
+
+function on_input(self, action_id, action)
+	-- On click
+	if action_id == click and not self.clicked then
+		if action.pressed then
+			if gui.pick_node(self.game_b, action.x, action.y)
+			or gui.pick_node(self.game_u, action.x, action.y)
+			and self.click ~= "#game_prox" then
+				self.click = "#game_prox"
+				local game = self.game_b
+				gui.cancel_animation(game, "position")
+				gui.animate(game, "position.y", self.game_p.y-10, gui.EASING_INCIRC, 0.1)
+
+			elseif gui.pick_node(self.colour_b, action.x, action.y)
+			or gui.pick_node(self.colour_u, action.x, action.y)
+			and self.click ~= "#colour_prox" then
+				self.click = "#colour_prox"
+				local colour = self.colour_b
+				gui.cancel_animation(colour, "position")
+				gui.animate(colour, "position.y", self.colour_p.y-10, gui.EASING_INCIRC, 0.1)
+			end
+		elseif action.released then
+			if self.click ~= nil then
+				self.clicked = true
+
+				if self.click == "#game_prox" then
+					gui.cancel_animation(self.game_b, "position")
+					gui.animate(self.game_b, "position.y", self.game_p.y, gui.EASING_OUTCIRC, 0.15)
+
+				elseif self.click == "#colour_prox" then
+					gui.cancel_animation(self.colour_b, "position")
+					gui.animate(self.colour_b, "position.y", self.colour_p.y, gui.EASING_OUTCIRC, 0.15)
+				end
+
+				timer.delay(0.2, false, function()
+					msg.post(".", "prox",{prox = self.click, x = -1, y = 0})
+				end)
+			end
+		end
+	end
+end

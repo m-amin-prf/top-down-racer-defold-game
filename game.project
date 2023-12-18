@@ -1,0 +1,26 @@
+[bootstrap]
+main_collection = /project/proxies/main.collectionc
+render = /render/custom.renderc
+
+[script]
+shared_state = 1
+
+[display]
+width = 1024
+height = 576
+
+[android]
+input_method = HiddenInputField
+
+[project]
+title = Topdown Racer
+
+[graphics]
+default_texture_min_filter = nearest
+default_texture_mag_filter = nearest
+
+[html5]
+show_fullscreen_button = 0
+show_made_with_defold = 0
+show_console_banner = 0
+

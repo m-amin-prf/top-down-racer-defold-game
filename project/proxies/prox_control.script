@@ -1,0 +1,75 @@
+-- Pre Hashing
+local l_prox = hash("proxy_loaded") -- Msg received when prox loads
+local s_prox = hash("s_prox") -- Switch Proxy
+local u_prox = hash("u_prox") -- Unload Proxy
+local pause = hash("escape") -- Esc Key
+
+-- Menu movement
+x_pol = 0
+y_pol = 1
+
+-- Globals
+colour = "blue"
+
+function init(self)
+	msg.post(".", "acquire_input_focus")
+	msg.post("@render:", "use_fixed_projection", { zoom = 1.5, near = -1, far = 1 })
+
+	self.c_prox = "#menu_prox" -- Store current proxy
+	msg.post(self.c_prox, "async_load") -- Load current proxy
+
+	self.pause = false
+	msg.post("#game_prox", "set_time_step", {factor = 1, mode = 1})
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == l_prox then
+		msg.post(sender, "init")
+		msg.post(sender, "enable")
+
+	elseif message_id == s_prox then
+		-- Finalise, disable and unload current proxy
+		msg.post(self.c_prox, "final")
+		msg.post(self.c_prox, "disable")
+		msg.post(self.c_prox, "unload")
+
+		-- Set new proxy to current proxy and load it 
+		self.c_prox = message.prox
+		msg.post(self.c_prox, "async_load")
+
+	elseif message_id == u_prox then
+		-- Finalise, disable and unload selected proxy (only for separated proxies)
+		msg.post(message.prox, "final")
+		msg.post(message.prox, "disable")
+		msg.post(message.prox, "unload")
+
+		if message.prox == "#pause_prox" then
+			msg.post("#game_prox", "set_time_step", {factor = 1, mode = 1}) -- unpause
+			self.pause = false -- store it as unpaused
+		end
+	end
+end
+
+function on_input(self, action_id, action)
+	if action_id == pause and self.c_prox == "#game_prox" then -- if esc key is inputted
+		if action.released then -- if key is released
+
+			local pause_menu = "#pause_prox" -- Pre fetch string
+
+			if self.pause then -- if game is paused
+				self.pause = false -- store it as unpaused
+				msg.post("#game_prox", "set_time_step", {factor = 1, mode = 1}) -- unpause
+
+				msg.post(pause_menu, "final")
+				msg.post(pause_menu, "disable")
+				msg.post(pause_menu, "unload")
+
+			else -- if game is not paused
+				self.pause = true -- store it as paused
+				msg.post("#game_prox", "set_time_step", {factor = 0, mode = 1}) -- pause
+				msg.post(pause_menu, "async_load")
+			end
+
+		end
+	end
+end

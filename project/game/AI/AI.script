@@ -1,0 +1,583 @@
+--[[
+
+THINGS NEEDED FOR THE AI AND HOW TO USE THEM
+
+Player position, point A, point B and the safe zone between A and B
+
+Find angle needed to drive in a straight line towards point b
+
+Distance from AI to point A and point B (safe zone): used to see if the AI is on track
+-- Pseudocode
+if distance to point b + distance to point a > max distance to point a and b then
+	points = 10 + 10 * max distance allowed / total distance
+else
+	points = 20 + 10 * distance to point b
+end
+
+Distance from AI to point B: used to see where AI needs to go
+-- Pseudocode
+if point b on left and points < 20 then
+	turn left
+elseif point b on right and points < 20 then
+	turn right
+else
+end
+
+Rotation between point A and B: acts as a pseudo axis
+-- Pseudocode
+local angle = math.atan2(point b y - point a y, point b x - point a x)
+local rotation = vmath.quat_rotation_z(angle)
+
+Distance from AI to point B: check if AI is going the right way
+-- Pseudocode
+if distance to point b now > distance to point b before then
+	if not facing point b then
+		turn to point b
+	else
+		accelerate
+	end
+end
+
+Distance between AI and Player: used to see if AI needs to speed up/crash into player
+-- Pseudocode
+distance vector = inverse rotated distance from AI to Player
+if distance vector x > -100 and distance vector x < 100 then
+	if distance vector x < 50 and distance vector x > -50 then
+		if distance vector y < 50 and distance vector y > -50 then
+			if distance vector y is positive then
+				turn left
+			else
+				turn right
+			end
+		end
+	else
+		boost
+	end
+end
+
+Change in points: used to detect behaviour (MIGHT NOT NEED)
+if points now > 20 and points then > 20 then
+	if points then > points now then
+		print "moving away"
+	else
+		print "on course"
+	end
+end
+--]]
+
+local function input_gen(self,a,b)
+	local inp1,inp2,inp3,inp4,inp5 = true,false,false,false,true
+	-- up down left right boost
+
+	if vmath.dot(vmath.vector3(0,1,0), vmath.normalize(b-go.get_position())) ~= -1 then
+
+		local rotation = vmath.quat_from_to(vmath.vector3(0,1,0), vmath.normalize(b-go.get_position()))
+
+		local q = go.get_rotation() * vmath.conj(rotation)
+		local angle = 2 * math.acos(q.w)
+		local factor = 1.0 / math.sqrt(1-q.w*q.w)
+		local axis = vmath.vector3(q.x * factor, q.y * factor, q.z * factor)
+
+		if angle > math.pi then
+			angle = 2*math.pi - angle
+			axis.z = - axis.z
+		end
+
+		--print(math.deg(angle),axis)
+
+		if math.deg(angle) > 0 then
+			if axis.z > 0 then
+				inp4 = true
+			elseif axis.z < 0 then
+				inp3 = true
+			end
+		end
+
+	end
+
+	--[[
+
+	THINGS NEEDED FOR THE AI AND HOW TO USE THEM
+
+	Player position, point A, point B and the safe zone between A and B
+
+	Distance from AI to point B: check if AI is going the right way
+	-- Pseudocode
+	if distance to point b now > distance to point b before then
+		if not facing point b then
+			turn to point b
+		else
+			accelerate
+		end
+	end
+
+	Distance between AI and Player: used to see if AI needs to speed up/crash into player
+	-- Pseudocode
+	distance vector = inverse rotated distance from AI to Player
+	if distance vector x > -100 and distance vector x < 100 then
+		if distance vector x < 50 and distance vector x > -50 then
+			if distance vector y < 50 and distance vector y > -50 then
+				if distance vector y is positive then
+					turn left
+				else
+					turn right
+				end
+			end
+		else
+			boost
+		end
+	end
+
+	Change in points: used to detect behaviour (MIGHT NOT NEED)
+	if points now > 20 and points then > 20 then
+		if points then > points now then
+			print "moving away"
+		else
+			print "on course"
+		end
+	end
+	--]]
+	return inp1,inp2,inp3,inp4,inp5
+end
+
+-- Inputs
+---- 1 = up
+---- 2 = down
+---- 3 = left
+---- 4 = right
+---- 5 = space
+
+-- Pre Hashing
+---- Collisions
+local contact = hash("contact_point_response")
+local collision = hash("collision_response")
+local trigger = hash("trigger_response")
+
+-- Points
+local point = hash("point")
+
+-- Movement
+local move_acceleration = 500
+local max_speed = 1000
+local grass_accfact = 1
+local boost_speed = 1.2
+
+function init(self)
+	self.go = false
+
+	self.point_total = 0
+
+	msg.post("@render:", "use_fixed_projection",{near=-1,far=1,zoom=0.5})
+
+	-- Complete randomness
+	math.randomseed(os.time())
+	math.random()
+
+	self.points = {
+	}
+
+	self.vel = vmath.vector3() -- velocity
+	self.correction = vmath.vector3() -- collision correction
+	self.move_input = vmath.vector3() -- x/y movement input
+
+	self.current_action = nil
+
+	--Up
+	self.pressed = {up = false, down = false, left = false, right = false}
+	self.held = {up = false, down = false, left = false, right = false}
+	self.released = {up = false, down = false, left = false, right = false}
+
+	self.inp_time = 0.01 -- time taken between AI inputs
+
+	self.road_contact = false -- is on road
+
+	self.boost = false -- is boosting
+	self.booster = 5 -- boost timer
+
+	self.turning = false -- is turning
+
+	self.map_update = 0 -- position on map
+end
+
+local function input_reset(self,num1,num2,num3,num4,num5)
+	if not num1 then
+		if self.released.up then
+			self.released.up = false
+		elseif self.held.up or self.pressed.up then
+			self.released.up = true
+		end
+		self.pressed.up = false
+		self.held.up = false
+	else
+		if self.pressed.up then
+			self.pressed.up = false
+			self.held.up = true
+		end
+	end
+	if not num2 then
+		if self.released.down then
+			self.released.down = false
+		elseif self.held.down or self.pressed.down then
+			self.released.down = true
+		end
+		self.pressed.down = false
+		self.held.down = false
+	else
+		if self.pressed.down then
+			self.pressed.down = false
+			self.held.down = true
+		end
+	end
+	if not num3 then
+		if self.released.left then
+			self.released.left = false
+		elseif self.held.left or self.pressed.left then
+			self.released.left = true
+		end
+		self.pressed.left = false
+		self.held.left = false
+	else
+		if self.pressed.left then
+			self.pressed.left = false
+			self.held.left = true
+		end
+	end
+	if not num4 then
+		if self.released.right then
+			self.released.right = false
+		elseif self.held.right or self.pressed.right then
+			self.released.right = true
+		end
+		self.pressed.right = false
+		self.held.right = false
+	else
+		if self.pressed.right then
+			self.pressed.right = false
+			self.held.right = true
+		end
+	end
+	if not num5 then
+		if self.released.boost then
+			self.released.boost = false
+		elseif self.held.boost or self.pressed.right then
+			self.released.boost = true
+		end
+		self.pressed.boost = false
+		self.held.boost = false
+	else
+		if self.pressed.boost then
+			self.pressed.boost = false
+			self.held.boost = true
+		end
+	end
+end
+
+local function input_sim(self)
+	-- Forward and backwards acceleration
+	if self.pressed.up or self.released.up or self.held.up then
+		self.move_input.y = 1
+	elseif self.pressed.down or self.released.down or self.held.down then
+		self.move_input.y = -1
+	end
+	-- Right and left turning
+	if self.pressed.right or self.released.right or self.held.right then
+		if math.abs(vmath.length(self.vel)) >= 1 then
+			self.move_input.x = 1
+		else
+			self.move_input.x = 1/2
+		end
+
+		if not self.turning then
+			self.turning = true
+			sprite.play_flipbook("#car", "drive",function()
+				sprite.play_flipbook("#car", "right")
+				if math.abs(vmath.length(self.vel)) >= 1 then
+					particlefx.play("#driftr")
+					particlefx.play("#drift")
+				end
+			end)
+		end
+		if self.released.right then
+			particlefx.stop("#driftr")
+			particlefx.stop("#drift")
+			if self.turning then
+				sprite.play_flipbook("#car", "right_back",function()
+					sprite.play_flipbook("#car", "drive")
+				end)
+				self.turning = false
+			end
+		end
+	elseif self.pressed.left or self.released.left or self.held.left then
+		if math.abs(vmath.length(self.vel)) >= 1 then
+			self.move_input.x = -1
+		else
+			self.move_input.x = -1/2
+		end
+
+		if not self.turning then
+			self.turning = true
+			sprite.play_flipbook("#car", "drive",function()
+				sprite.play_flipbook("#car", "left")
+				if math.abs(vmath.length(self.vel)) >= 1 then
+					particlefx.play("#driftl")
+					particlefx.play("#drift")
+				end
+			end)
+		end
+
+		if self.released.left then
+			particlefx.stop("#driftl")
+			particlefx.stop("#drift")
+			if self.turning then
+				sprite.play_flipbook("#car", "left_back",function()
+					sprite.play_flipbook("#car", "drive")
+				end)
+				self.turning = false
+			end
+		end
+	end
+	if self.pressed.boost or self.released.boost or self.held.boost then
+		if self.pressed.boost then
+			self.boost = true
+			particlefx.play("#boost")
+		elseif self.released.boost then
+			self.boost = false
+			particlefx.stop("#boost")
+		end
+	end
+end
+
+function update(self, dt)
+	if self.point_a ~= nil and self.point_b ~= nil and dt ~= 0 and self.go then
+		-- Action.pressed and .released simulator
+		if self.inp_time >= 0.005 then
+			self.inp_time = 0
+
+			local choice1,choice2,choice3,choice4,choice5 = input_gen(self, self.point_a, self.point_b)
+
+			input_reset(self, choice1, choice2, choice3, choice4, choice5)
+			if choice1 then -- Up
+				if not self.pressed.up then
+					if not self.held.up then
+						self.pressed.up = true
+					end
+					if self.pressed.down or self.held.down then
+						self.pressed.down = false
+						self.held.down = false
+					end
+				end
+			end
+			if choice2 then -- Down
+				if not self.pressed.down then
+					if not self.held.down then
+						self.pressed.down = true
+					end
+					if self.pressed.up or self.held.up then
+						self.pressed.up = false
+						self.held.up = false
+					end
+				end
+			end
+			if choice3 then -- Left
+				if not self.pressed.left then
+					if not self.held.left then
+						self.pressed.left = true
+					end
+					if self.pressed.right or self.held.right then
+						self.pressed.right = false
+						self.held.right = false
+					end
+				end
+			end
+			if choice4 then -- Right
+				if not self.pressed.right then
+					if not self.held.right then
+						self.pressed.right = true
+					end
+					if self.pressed.left or self.held.left then
+						self.pressed.left = false
+						self.held.left = false
+					end
+				end
+			end
+			if choice5 then -- Boost
+				if not self.pressed.boost and not self.held.boost then
+					self.pressed.boost = true
+				end
+			end
+		else
+			self.inp_time = self.inp_time + dt
+		end
+
+		input_sim(self)
+
+		-- Boost Timer
+		if self.boost then -- if boosting
+			if self.booster >= 0 then -- if boost time > min time
+				self.booster = self.booster - dt -- decrement boost time
+			end
+			if self.booster <= 0 then -- if boost time <= min time
+				self.booster = 0.5 -- set boost cooldown
+				self.boost = false -- not boosting
+			end
+		end
+		if not self.boost then -- if not boosting
+			if self.booster <= 5 then -- if boost time <= max time
+				self.booster = self.booster + dt -- increment boost time
+			end
+			if self.booster > 5 then -- if boost time > max time
+				self.booster = 5 -- clamp boost time
+			end
+		end
+		-- []
+
+		-- Rotation handling
+		local new_rot = -self.move_input.x*(math.pi/2.75)*dt
+
+		-- Conditional Speed Increase
+		if not self.road_contact then -- if not touching the road
+			max_speed = max_speed * grass_accfact -- lower top speed
+			new_rot = new_rot * grass_accfact
+		end
+		if self.boost and self.booster > 0 then -- if the player is boosting
+			max_speed = max_speed * boost_speed -- higher top speed
+			new_rot = new_rot * boost_speed
+		end
+		--[[if self.speed_time > 0 then
+			max_speed = max_speed * powerup_speed
+			new_rot = new_rot * powerup_speed
+		end--]]
+		new_rot = vmath.quat_rotation_z(new_rot)
+
+		local c_rotat = go.get_rotation()
+		go.set_rotation(c_rotat*new_rot) -- Set new player rotation
+
+		local target_speed = self.move_input.y * max_speed -- Define target speed
+		local speed_diff = target_speed - self.vel.y -- difference in velocity of x
+
+		local speed_diff_x = 0 - self.vel.x -- difference in velocity
+
+		local acceleration = vmath.vector3()
+		if speed_diff ~= 0 then -- if there is a difference
+			if speed_diff > 0 then -- if the difference is positive
+				acceleration.y = move_acceleration -- accelerate
+			elseif speed_diff < 0 then -- if the difference is negative
+				acceleration.y = -move_acceleration -- decelerate
+			end
+		end
+
+		if speed_diff_x ~= 0 then -- if there is a difference
+			if speed_diff_x > 0 then -- if the difference is positive
+				acceleration.x = move_acceleration -- accelerate
+			elseif speed_diff_x < 0 then -- if the difference is negative
+				acceleration.x = -move_acceleration*0.25 -- decelerate
+			end
+		end
+
+		if not self.road_contact then -- if not touching the road
+			acceleration = acceleration * grass_accfact -- slow acceleration
+		end
+
+		if self.boost and self.booster > 0 then -- if the player is boosting
+			if acceleration.x > 0 then
+				acceleration = acceleration * boost_speed -- fast acceleration
+			end
+		end
+
+		local dv = acceleration * dt -- delta velocity
+		if math.abs(dv.y) > math.abs(speed_diff) then -- if too much acceleration
+			dv.y = speed_diff -- clamp acceleration
+		end
+
+		if math.abs(dv.x) > math.abs(speed_diff_x) then -- if too much acceleration
+			dv.x = speed_diff_x -- clamp acceleration
+		end
+		-- Store initial velocity
+		local u = self.vel
+		-- Add acceleration to new velocity
+		self.vel = self.vel + dv
+		-- add vectors (delta position)
+		local dp = vmath.rotate(c_rotat,(u + self.vel) *dt *0.5)
+		go.set_position(go.get_position()+dp)
+
+		self.correction = vmath.vector3()
+		self.move_input = vmath.vector3()
+		self.road_contact = false
+		max_speed = 800
+
+		-- Map Updater
+		if self.map_update >= 0.1 then
+			self.map_update = 0
+			if dp ~= 0 then
+				msg.post("/player#screen", "pos",{pos = go.get_position(),ai=true})
+			end
+		else
+			self.map_update = self.map_update + dt
+		end
+	end
+end
+
+local function handle_obstacle_contact(self, normal, distance)
+	local rotation = vmath.conj(go.get_rotation()) * vmath.quat_rotation_z(math.rad(0))
+	-- rotate velocity
+	self.vel = vmath.rotate(go.get_rotation(), self.vel)
+	-- project the correction vector onto the contact normal
+	local proj = vmath.dot(self.correction, normal)
+	-- calculate the compensation we need to make for this contact point
+	local comp = (distance - proj) * normal
+	-- add it to the correction vector
+	self.correction = self.correction + comp
+	-- apply the compensation to the player character
+	go.set_position(go.get_position() + comp)
+	-- project the velocity onto the normal
+	proj = vmath.dot(self.vel, normal)
+	-- if the projection is negative, it means that some of the velocity points towards the contact point
+	if proj < 0 then
+		-- remove that component in that case
+		self.vel = self.vel - proj * normal
+	end
+	self.vel = vmath.rotate(rotation, self.vel)
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == hash("go") then
+		self.go = true
+	end
+	if message_id == point then
+		table.insert(self.points,message.order,message.point)
+
+		if message.order == 1 then
+			self.point_a = go.get_position(message.point)
+		elseif message.order == 2 then
+			self.point_b = go.get_position(message.point)
+			self.ID_point_b = message.point
+		end
+	end
+	if message_id == collision then
+		if message.group == road then
+			self.road_contact = true
+		end
+	end
+	if message_id == contact then
+		if message.group == hazard then
+			handle_obstacle_contact(self, message.normal, message.distance)
+		end
+	end
+	if message_id == trigger then
+		if message.other_id == hash(self.ID_point_b) then
+			self.point_a = go.get_position(self.ID_point_b)
+			for i = 1,#self.points do
+				if self.points[i] == self.ID_point_b then
+					if i == #self.points then
+						self.ID_point_b = self.points[1]
+						break
+					else
+						self.ID_point_b = self.points[i+1]
+						break
+					end
+				end
+			end
+			self.point_b = go.get_position(self.ID_point_b)
+		end
+	end
+end

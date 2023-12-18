@@ -1,0 +1,120 @@
+-- Pre Hashing
+local pos = hash("pos")
+local time = hash("time_elapsed")
+local lap = hash("lap_time")
+local boost = hash("boost")
+
+local map_size = vmath.vector3(1/5.5,1/5.5,1)
+
+function init(self)
+	local point_col = vmath.vector3(0.66666666666666666666666666666667,0.66666666666666666666666666666667,0.66666666666666666666666666666667)
+	if colour == "blue" then
+		point_col.z = 1
+	elseif colour == "green" then
+		point_col.y = 1
+	else
+		point_col.x = 1
+	end
+
+	math.randomseed(os.time())
+	math.random()
+
+	self.player = gui.get_node("point") -- player dot on minimap
+	gui.set_color(self.player, point_col)
+	self.ai = gui.get_node("point1")
+
+	self.minimap = gui.get_node("minimap") -- Minimap sprite
+	self.mapscale = gui.get_scale(self.minimap).x -- Scale to multiply postion by
+	self.mappos = gui.get_position(self.minimap) -- position to use as 0 point for dots
+
+	self.time = gui.get_node("time")
+	self.laps = gui.get_node("laps")
+	self.lap_time = gui.get_node("lap_time")
+	self.lap_text = self.lap_time
+
+	self.boost = gui.get_node("boost")
+	self.boostscale = gui.get_scale(self.boost)
+
+	self.speed = gui.get_node("speed")
+end
+
+function final(self)
+end
+
+function update(self, dt)
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == pos then
+		local pointpos = vmath.mul_per_elem(message.pos,map_size) * self.mapscale
+		local point = self.player
+		if message.ai then
+			point = self.ai
+		else
+			gui.set_text(self.speed, tostring(math.floor(message.speed)).." mph")
+		end
+		gui.set_position(point, pointpos + self.mappos)
+	end
+
+	if message_id == time then
+		local time = message.time:sub(1,#message.time-2).."."..message.time:sub(-2,-1)
+		local lap = message.lap_time:sub(1,#message.lap_time-2).."."..message.lap_time:sub(-2,-1)
+		if time:sub(1,1) == "." then
+			time = "0".."."..message.time:sub(-2,-1)
+		end
+		if lap:sub(1,1) == "." then
+			lap = "0".."."..message.lap_time:sub(-2,-1)
+		end
+		gui.set_text(self.time, "Time: "..time)
+		gui.set_text(self.lap_time, "Lap Time: "..lap)
+	end
+
+	if message_id == lap then
+		gui.set_text(self.laps, "Laps: "..tostring(message.laps))
+		if message.laps >= 3 then
+			gui.animate(gui.get_node("finish"), "color.w", 1, gui.EASING_OUTCIRC, 0.5)
+
+			-- Fireworks
+			local t1,t2,t3,t4= math.random()*2,math.random()*2,math.random()*2,math.random()*2
+			timer.delay(t1, false,
+			function()
+				gui.play_particlefx(gui.get_node("particlefx"))
+			end)
+			timer.delay(t2, false,
+			function()
+				gui.play_particlefx(gui.get_node("particlefx1"))
+			end)
+			timer.delay(t3, false,
+			function()
+				gui.play_particlefx(gui.get_node("particlefx2"))
+			end)
+			timer.delay(t4, false,
+			function()
+				gui.play_particlefx(gui.get_node("particlefx3"))
+			end)
+		end
+		local time = message.time:sub(1,#message.time-2).."."..message.time:sub(-2,-1)
+		self.lap_text = gui.new_text_node(
+			gui.get_position(self.lap_text)-vmath.vector3(0,37.5,0),
+			"Lap "..tostring(message.laps).."\n  Time: "..tostring(time)
+		)
+		gui.set_font(self.lap_text, "time_font")
+		gui.set_pivot(self.lap_text, gui.PIVOT_NW)
+	end
+
+	if message_id == boost then
+		local scale = message.time/5 * self.boostscale.y
+		if message.time < 0 then
+			scale = 0
+			gui.animate(self.boost, "scale.y", scale, gui.EASING_LINEAR, 0.0001)
+		elseif message.time > 5 then
+			scale = 1
+			gui.animate(self.boost, "scale.y", scale, gui.EASING_LINEAR, 0.05)
+		else
+			gui.animate(self.boost, "scale.y", scale, gui.EASING_LINEAR, 0.05)
+		end
+	end
+end
+
+function on_input(self, action_id, action)
+end

@@ -1,0 +1,57 @@
+-- Pre Hashing
+local click = hash("touch")
+local prox = hash("prox")
+
+function init(self)
+	gui.set_render_order(15)
+
+	self.menu = gui.get_node("reset")
+	self.menu_p = gui.get_position(self.menu)
+	self.menu_u = gui.get_node("reset_under")
+
+	msg.post(".", "acquire_input_focus")
+
+	self.click = nil
+	self.clicked = false
+end
+
+function final(self)
+	msg.post(".", "release_input_focus")
+end
+
+function update(self, dt)
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == prox then
+		msg.post(".", "release_input_focus")
+		x_pol, y_pol = -x_pol, -y_pol
+		msg.post("main:/prox_control", "s_prox",{prox = message.prox})
+		msg.post("main:/prox_control", "u_prox",{prox = "#pause_prox"})
+	end
+end
+
+function on_input(self, action_id, action)
+	if action_id == click and not self.clicked then
+		if action.pressed then
+			if gui.pick_node(self.menu, action.x, action.y)
+			or gui.pick_node(self.menu_u, action.x, action.y)
+			and self.click ~= "#menu_prox" then
+				self.click = "#menu_prox"
+				local menu = self.menu
+				gui.cancel_animation(menu, "position")
+				gui.animate(menu, "position.y", self.menu_p.y-10, gui.EASING_INCIRC, 0.1)
+			end
+		elseif action.released then
+			if self.click ~= nil then
+				self.clicked = true
+				gui.cancel_animation(self.menu, "position")
+				gui.animate(self.menu, "position.y", self.menu_p.y, gui.EASING_OUTCIRC, 0.15)
+
+				timer.delay(0.25, false, function()
+					msg.post(".", "prox",{prox = self.click})
+				end)
+			end
+		end
+	end
+end
